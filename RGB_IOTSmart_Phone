@@ -1,0 +1,178 @@
+#include <ESP8266WiFi.h>
+#include <ESPAsyncWebServer.h>
+#include <WebSocketsServer.h>
+
+// Define RGB LED pins
+const int redPin = D1;
+const int greenPin = D2;
+const int bluePin = D3;
+
+// HTML page content
+const char index_html[] PROGMEM = R"rawliteral(
+<!DOCTYPE HTML><html>
+<head>
+  <title>RGB LED Control</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    .slider {
+      -webkit-appearance: none;
+      width: 100%;
+      height: 15px;
+      border-radius: 5px;
+      background: #d3d3d3;
+      outline: none;
+      opacity: 0.7;
+      -webkit-transition: .2s;
+      transition: opacity .2s;
+    }
+    .slider:hover {
+      opacity: 1;
+    }
+    .slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 25px;
+      height: 25px;
+      border-radius: 50%;
+      background: #4CAF50;
+      cursor: pointer;
+    }
+    .slider::-moz-range-thumb {
+      width: 25px;
+      height: 25px;
+      border-radius: 50%;
+      background: #4CAF50;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <h1>RGB LED Control</h1>
+  <div>
+    <label for="redRange">Red:</label>
+    <input type="range" min="0" max="1023" value="0" class="slider" id="redRange">
+  </div>
+  <div>
+    <label for="greenRange">Green:</label>
+    <input type="range" min="0" max="1023" value="0" class="slider" id="greenRange">
+  </div>
+  <div>
+    <label for="blueRange">Blue:</label>
+    <input type="range" min="0" max="1023" value="0" class="slider" id="blueRange">
+  </div>
+  <script>
+    var gateway = `ws://${window.location.hostname}:81/`;
+    var websocket;
+    window.addEventListener('load', onLoad);
+    
+    function onLoad(event) {
+      initWebSocket();
+      initSliders();
+    }
+    
+    function initWebSocket() {
+      websocket = new WebSocket(gateway);
+      websocket.onopen = onOpen;
+      websocket.onclose = onClose;
+      websocket.onmessage = onMessage;
+    }
+    
+    function onOpen(event) {
+      console.log('Connection opened');
+    }
+    
+    function onClose(event) {
+      console.log('Connection closed');
+    }
+    
+    function onMessage(event) {
+      console.log(event.data);
+    }
+    
+    function initSliders() {
+      var redSlider = document.getElementById('redRange');
+      var greenSlider = document.getElementById('greenRange');
+      var blueSlider = document.getElementById('blueRange');
+
+      redSlider.oninput = function() {
+        websocket.send('r' + this.value);
+      }
+      greenSlider.oninput = function() {
+        websocket.send('g' + this.value);
+      }
+      blueSlider.oninput = function() {
+        websocket.send('b' + this.value);
+      }
+    }
+  </script>
+</body>
+</html>
+)rawliteral";
+
+// WebSocket event handler
+void onWebSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length) {
+  if(type == WStype_TEXT) {
+    char color = (char)payload[0];
+    int value = String((char*)payload + 1).toInt();
+    Serial.print(color);
+    Serial.print(": ");
+    Serial.println(value);
+
+    switch (color) {
+      case 'r':
+        analogWrite(redPin, value);
+        break;
+      case 'g':
+        analogWrite(greenPin, value);
+        break;
+      case 'b':
+        analogWrite(bluePin, value);
+        break;
+    }
+  }
+}
+
+const char* ssid = "";
+const char* password = "";
+
+AsyncWebServer server(80);
+WebSocketsServer webSocket = WebSocketsServer(81);
+
+void setup() {
+  Serial.begin(115200);
+
+  // Initialize RGB LED pins as outputs
+  pinMode(redPin, OUTPUT);
+  pinMode(greenPin, OUTPUT);
+  pinMode(bluePin, OUTPUT);
+
+  // Set initial color to off
+  analogWrite(redPin, 0);
+  analogWrite(greenPin, 0);
+  analogWrite(bluePin, 0);
+
+  // Connect to Wi-Fi
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(1000);
+    Serial.println("Connecting to WiFi...");
+  }
+  Serial.println("Connected to WiFi");
+  // Print the IP address
+  Serial.println(WiFi.localIP());
+  // Serve the HTML file
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send_P(200, "text/html", index_html);
+  });
+
+  // Start WebSocket server
+  webSocket.begin();
+  webSocket.onEvent(onWebSocketEvent);
+
+  // Start server
+  server.begin();
+}
+
+void loop() {
+  webSocket.loop();
+}
